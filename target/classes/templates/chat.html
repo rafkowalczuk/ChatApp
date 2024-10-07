@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Chat App</title>
+    <meta charset="UTF-8">
+    <style>
+        /* Globalne style dla całej strony */
+        body {
+            background-color: #e6f5e9; /* Jasnozielone tło */
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+
+        h1 {
+            color: #2f8f46; /* Głęboki zielony kolor */
+            text-align: center;
+            position: absolute;
+            top: 20px;
+        }
+
+        /* Kontener główny na wiadomości i aktywnych użytkowników */
+        #main-container {
+            display: flex;
+            justify-content: space-between;
+            width: 900px;
+            height: 500px;
+            position: relative;
+        }
+
+        /* Sekcja wiadomości */
+        #chat-container {
+            display: flex;
+            flex-direction: column;
+            background-color: #c8e6c9; /* Delikatna zieleń */
+            border: 2px solid #2f8f46;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 65%;
+            height: 100%; /* Dopasowanie do kontenera głównego */
+        }
+
+        /* Okno wiadomości */
+        #messages {
+            background-color: #dcedc8; /* Jaśniejsza zieleń */
+            border: 2px solid #2f8f46;
+            border-radius: 10px;
+            width: 100%;
+            flex-grow: 1; /* Okno wiadomości zajmuje całą przestrzeń */
+            overflow-y: scroll;
+            padding: 10px;
+            color: #2f8f46; /* Zielony kolor tekstu */
+            margin-bottom: 10px;
+        }
+
+        /* Pole tekstowe i przycisk wysyłania */
+        #input-container {
+            display: flex;
+            width: 100%;
+        }
+
+        #message-input {
+            width: 80%;
+            padding: 10px;
+            border-radius: 5px;
+            border: 2px solid #2f8f46;
+            background-color: #f1f8e9; /* Bardzo jasna zieleń */
+            color: #2f8f46;
+            margin-right: 10px;
+        }
+
+        #send-btn {
+            background-color: #2f8f46;
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 20%;
+        }
+
+        #send-btn:hover {
+            background-color: #388e3c;
+        }
+
+        /* Okno aktywnych użytkowników */
+        #active-users {
+            background-color: #dcedc8; /* Jaśniejsza zieleń */
+            border: 2px solid #2f8f46;
+            border-radius: 10px;
+            width: 30%; /* Dopasowanie szerokości */
+            height: 100%; /* Dopasowanie wysokości do kontenera głównego */
+            overflow-y: scroll;
+            padding: 10px;
+            color: #2f8f46;
+        }
+
+        /* Stylowanie każdej wiadomości */
+        .message {
+            padding: 10px;
+            margin: 5px 0;
+            cursor: pointer;
+            background-color: #a5d6a7; /* Jeszcze jaśniejszy odcień zieleni dla wiadomości */
+            border-radius: 5px;
+            position: relative;
+            color: #2f8f46; /* Zielony kolor tekstu */
+        }
+
+        /* Stylowanie przycisku Delete */
+        .delete-btn {
+            display: none;
+            position: absolute;
+            right: 5px;
+            top: 5px;
+            background-color: #388e3c; /* Ciemniejszy zielony kolor */
+            color: white;
+            border: none;
+            border-radius: 5px;
+            padding: 2px 5px;
+            cursor: pointer;
+        }
+
+        .message:hover .delete-btn {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+<h1>CHAT APP</h1>
+
+<div id="main-container">
+    <!-- Sekcja wiadomości -->
+    <div id="chat-container">
+        <div id="messages"></div>
+
+        <div id="input-container">
+            <input type="text" id="message-input" placeholder="type here">
+            <button id="send-btn">send</button>
+        </div>
+    </div>
+
+    <!-- Sekcja aktywnych użytkowników -->
+    <div id="active-users">
+        <h2>ACTIVE USERS</h2>
+        <ul id="active-users-list">
+        </ul>
+    </div>
+</div>
+
+<script th:inline="javascript">
+    var username = /*[[${username}]]*/ 'guest';
+    var userRole = /*[[${role}]]*/ 'USER';  // Zakładamy, że rola użytkownika jest przekazywana z backendu
+
+    console.log(userRole);
+</script>
+
+<script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+
+<script>
+    var socket = new SockJS('/ws');
+    var stompClient = Stomp.over(socket);
+    var lastMessageId = null; // Zmienna przechowująca ID ostatniej wiadomości wczytanej
+
+    stompClient.connect({}, function (frame) {
+        stompClient.send("/app/connect", {}, username);
+
+        // Subskrybuj wiadomości ogólne
+        stompClient.subscribe('/topic/messages', function (message) {
+            var msg = JSON.parse(message.body);
+            displayMessage(msg, true);
+        });
+
+        // Subskrybuj wyniki wyszukiwania wiadomości
+        stompClient.subscribe('/topic/search-results', function (message) {
+            var searchResults = JSON.parse(message.body);
+            displaySearchResults(searchResults); // Wyświetl wyniki wyszukiwania
+        });
+
+        // Subskrybuj historię wiadomości (do przewijania w górę)
+        stompClient.subscribe('/topic/history', function (message) {
+            var msg = JSON.parse(message.body);
+            displayMessage(msg, false);
+        });
+
+        // Subskrybuj aktywnych użytkowników
+        stompClient.subscribe('/topic/active-users', function (message) {
+            var activeUsersDiv = document.getElementById("active-users-list");
+            var users = JSON.parse(message.body);
+            activeUsersDiv.innerHTML = '';
+
+            users.forEach(function (user) {
+                if (user) {
+                    activeUsersDiv.innerHTML += '<li>' + user + '</li>';
+                }
+            });
+        });
+
+        // Subskrybuj prywatne wiadomości
+        stompClient.subscribe('/user/queue/private', function (message) {
+            var msg = JSON.parse(message.body);
+            var messagesDiv = document.getElementById("messages");
+            messagesDiv.innerHTML += '<p><b>Private</b> ' + msg.user + ': ' + msg.message + '</p>';
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+
+        // Subskrybuj powiadomienia o usuniętych wiadomościach
+        stompClient.subscribe('/topic/message-deleted', function (message) {
+            var messageId = message.body;
+            var messageElement = document.getElementById('message-' + messageId);
+            if (messageElement) {
+                messageElement.remove();  // Usuwamy wiadomość z widoku
+            }
+        });
+
+        // Ładuj pierwsze 20 wiadomości na początku
+        loadHistory();
+    });
+
+    // Funkcja do wyświetlania wiadomości
+    function displayMessage(message, appendToBottom = true) {
+        var messagesDiv = document.getElementById("messages");
+        var msgHtml = `
+            <div class="message" id="message-${message.id}">
+                ${message.user}: ${message.message}
+                ${userRole === "MODERATOR" ? `<button class="delete-btn" onclick="deleteMessage(${message.id})">Delete</button>` : ""}
+            </div>
+        `;
+
+        if (appendToBottom) {
+            messagesDiv.innerHTML += msgHtml;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        } else {
+            // Dodaj wiadomości na górę
+            var currentScrollPosition = messagesDiv.scrollTop;
+            messagesDiv.innerHTML = msgHtml + messagesDiv.innerHTML;
+            messagesDiv.scrollTop = currentScrollPosition + 30;
+        }
+
+        // Aktualizacja lastMessageId na ID ostatniej wiadomości
+        lastMessageId = message.id;
+    }
+
+    // Funkcja do usuwania wiadomości
+    function deleteMessage(messageId) {
+        stompClient.send("/app/delete-message", {}, JSON.stringify({
+            'messageId': messageId
+        }));
+    }
+
+    document.getElementById("send-btn").addEventListener("click", function () {
+        var inputField = document.getElementById("message-input");
+        var messageContent = inputField.value.trim();
+
+        if (messageContent.startsWith("/whisper")) {
+            handleWhisperCommand(messageContent);
+        } else if (messageContent.startsWith("/search")) {
+            handleSearchCommand(messageContent);
+        } else if (messageContent !== "") {
+            // Jeśli to nie komenda, wyślij wiadomość na czat ogólny
+            stompClient.send("/app/message", {}, JSON.stringify({
+                'user': username,
+                'message': messageContent
+            }));
+        }
+        inputField.value = '';
+    });
+
+    // Obsługa komendy /whisper
+    function handleWhisperCommand(messageContent) {
+        var commandParts = messageContent.split(" ");
+        if (commandParts.length >= 3) {
+            var recipient = commandParts[1];
+            var privateMessage = commandParts.slice(2).join(" ");
+
+            // Wysyłanie prywatnej wiadomości
+            stompClient.send("/app/private-message", {}, JSON.stringify({
+                'recipient': recipient,
+                'message': privateMessage,
+                'sender': username
+            }));
+        } else {
+            console.error("Błędna składnia komendy /whisper. Użyj: /whisper NICK_UŻYTKOWNIKA Wiadomość");
+        }
+    }
+
+    // Funkcja do obsługi komendy /search
+    function handleSearchCommand(messageContent) {
+        var commandParts = messageContent.split(" ");
+        if (commandParts.length >= 2) {
+            var keyword = commandParts.slice(1).join(" ");
+
+            // Wysyłanie zapytania o wyszukiwanie wiadomości
+            stompClient.send("/app/search", {}, keyword);
+        } else {
+            console.error("Błędna składnia komendy /search. Użyj: /search SŁOWO_KLUCZOWE");
+        }
+    }
+
+    // Funkcja do obsługi wyświetlania wyników wyszukiwania
+    function displaySearchResults(messages) {
+        var messagesDiv = document.getElementById("messages");
+        messagesDiv.innerHTML = ""; // Wyczyść wiadomości, aby pokazać wyniki wyszukiwania
+
+        if (messages.length === 0) {
+            messagesDiv.innerHTML = "<p>No messages found for the given keyword.</p>";
+        } else {
+            messages.forEach(function(message) {
+                var msgHtml = `
+                <div class="message" id="message-${message.id}">
+                    ${message.user}: ${message.message}
+                    ${userRole === "MODERATOR" ? `<button class="delete-btn" onclick="deleteMessage(${message.id})">Delete</button>` : ""}
+                </div>
+            `;
+                messagesDiv.innerHTML += msgHtml;
+            });
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+    }
+
+    // Ładowanie historii wiadomości
+    function loadHistory() {
+        stompClient.send("/app/history", {}, JSON.stringify({
+            'lastMessageId': lastMessageId
+        }));
+    }
+
+    // Obsługa przewijania, aby załadować więcej wiadomości
+    var messagesDiv = document.getElementById("messages");
+    messagesDiv.addEventListener('scroll', function () {
+        if (messagesDiv.scrollTop === 0) {
+            loadHistory(); // Ładuj więcej wiadomości, gdy dotrzesz na szczyt
+        }
+    });
+
+    window.addEventListener("beforeunload", function () {
+        stompClient.send("/app/disconnect", {}, username);
+    });
+</script>
+</body>
+</html>
